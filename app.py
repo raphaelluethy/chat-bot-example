@@ -1,6 +1,8 @@
 import streamlit as st
 import os
 import time
+import json
+from datetime import datetime
 from openai import OpenAI
 
 # SET YOUR OPENAI API KEY HERE
@@ -10,12 +12,25 @@ ASSISTANT_ID = ""
 
 st.set_page_config(page_title="KI Assistenten Chat", page_icon="", layout="wide")
 
+# Custom CSS to make sidebar wider
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"][aria-expanded="true"] {
+        min-width: 450px;
+        max-width: 450px;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
 
 @st.cache_resource
 def get_openai_client():
     api_key = OPENAI_API_KEY if OPENAI_API_KEY else os.getenv("OPENAI_API_KEY", "")
     if not api_key:
-        _ = st.error("Please set your OpenAI API key.")
+        st.error("Please set your OpenAI API key.")
         return None
     return OpenAI(api_key=api_key)
 
@@ -27,6 +42,10 @@ if "thread" not in st.session_state:
     st.session_state.thread = None
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "logs" not in st.session_state:
+    st.session_state.logs = []
+if "show_logs" not in st.session_state:
+    st.session_state.show_logs = False
 
 
 # Configuration
@@ -34,57 +53,119 @@ if "messages" not in st.session_state:
 def get_assistant_id():
     assistant_id = ASSISTANT_ID if ASSISTANT_ID else os.getenv("ASSISTANT_ID", "")
     if not assistant_id:
-        _ = st.error("Please set your Assistant ID.")
+        st.error("Please set your Assistant ID.")
         return None
     return assistant_id
 
 
+def add_log(level, message, details=None):
+    """Add a log entry to the session state"""
+    # Translate log levels to German
+    level_translation = {
+        "INFO": "INFO",
+        "SUCCESS": "ERFOLG",
+        "ERROR": "FEHLER",
+        "DEBUG": "DEBUG",
+    }
+    german_level = level_translation.get(level, level)
+
+    log_entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "level": german_level,
+        "message": message,
+        "details": details,
+    }
+    st.session_state.logs.append(log_entry)
+    # Keep only last 100 logs to prevent memory issues
+    if len(st.session_state.logs) > 100:
+        st.session_state.logs = st.session_state.logs[-100:]
+
+
 def create_thread():
     """Create a new thread"""
+    add_log("INFO", "Erstelle neuen Thread")
     try:
         thread = client.beta.threads.create()
+        add_log("SUCCESS", f"Thread erfolgreich erstellt", {"thread_id": thread.id})
         return thread
     except Exception as e:
-        _ = st.error(f"Error creating thread: {e}")
+        add_log("ERROR", f"Fehler beim Erstellen des Threads: {e}")
+        st.error(f"Error creating thread: {e}")
         return None
 
 
 def submit_message(assistant_id, thread_id, user_message):
     """Submit a message to the thread and create a run"""
+    add_log(
+        "INFO",
+        f"Sende Nachricht",
+        {"thread_id": thread_id, "message_length": len(user_message)},
+    )
     try:
         # Create message
-        client.beta.threads.messages.create(
+        message = client.beta.threads.messages.create(
             thread_id=thread_id, role="user", content=user_message
         )
+        add_log("SUCCESS", f"Nachricht erstellt", {"message_id": message.id})
 
         # Create run
         run = client.beta.threads.runs.create(
             thread_id=thread_id, assistant_id=assistant_id
         )
+        add_log("SUCCESS", f"Run erstellt", {"run_id": run.id, "status": run.status})
         return run
     except Exception as e:
+        add_log("ERROR", f"Fehler beim Senden der Nachricht: {e}")
         st.error(f"Error submitting message: {e}")
         return None
 
 
 def wait_on_run(run, thread_id):
     """Wait for a run to complete"""
+    add_log(
+        "INFO",
+        f"Warte auf Abschluss des Runs",
+        {"run_id": run.id, "initial_status": run.status},
+    )
+    status_count = 0
     while run.status == "queued" or run.status == "in_progress":
         try:
             run = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
+            status_count += 1
+            if status_count % 10 == 0:  # Log every 5 seconds
+                add_log(
+                    "DEBUG",
+                    f"Run-Status-Prüfung",
+                    {"run_id": run.id, "status": run.status, "checks": status_count},
+                )
             time.sleep(0.5)
         except Exception as e:
+            add_log("ERROR", f"Fehler bei der Prüfung des Run-Status: {e}")
             st.error(f"Error checking run status: {e}")
             break
+
+    add_log(
+        "INFO",
+        f"Run abgeschlossen",
+        {"run_id": run.id, "final_status": run.status, "total_checks": status_count},
+    )
     return run
 
 
 def get_thread_messages(thread_id):
     """Get all messages in a thread"""
+    add_log("INFO", f"Rufe Thread-Nachrichten ab", {"thread_id": thread_id})
     try:
         messages = client.beta.threads.messages.list(thread_id=thread_id, order="asc")
+        message_count = len(messages.data) if messages.data else 0
+        add_log(
+            "SUCCESS",
+            f"Nachrichten abgerufen",
+            {"count": message_count, "thread_id": thread_id},
+        )
         return messages
     except Exception as e:
+        add_log("ERROR", f"Fehler beim Abrufen der Nachrichten: {e}")
         st.error(f"Error getting messages: {e}")
         return None
 
@@ -103,10 +184,10 @@ def display_message(message):
 
 
 # Main interface
-_ = st.title("KI Assistenten Chat")
+st.title("KI Assistenten Chat")
 
 with st.sidebar:
-    _ = st.header("Konfiguration")
+    st.header("Konfiguration")
 
     assistant_id_input = st.text_input(
         "Assistenten-ID",
@@ -121,7 +202,7 @@ with st.sidebar:
         # Get assistant info
         try:
             assistant = client.beta.assistants.retrieve(assistant_id_input)
-            _ = st.success(
+            st.success(
                 f"Sie sind nun verbunden mit dem Assistenten: **{assistant.name}**"
             )
             st.write(f"**Model:** {assistant.model}")
@@ -137,14 +218,98 @@ with st.sidebar:
                     st.rerun()
 
         except Exception as e:
-            _ = st.error(f"Failed to connect to assistant: {e}")
+            st.error(f"Failed to connect to assistant: {e}")
             st.stop()
     else:
-        _ = st.warning("Bitte geben Sie eine Assistenten-ID ein, um zu chatten")
-        _ = st.info(
+        st.warning("Bitte geben Sie eine Assistenten-ID ein, um zu chatten")
+        st.info(
             "Sie können eine Assistenten-ID von der [OpenAI Playground](https://platform.openai.com/playground) Webseite erhalten."
         )
         st.stop()
+
+    # Logs section in sidebar
+    st.divider()
+    st.markdown(f"### Logs ({len(st.session_state.logs)})")
+
+    # Toggle for showing logs
+    if st.button(
+        "▶ Ausklappen" if not st.session_state.show_logs else "▼ Zuklappen",
+        key="logs_toggle",
+    ):
+        st.session_state.show_logs = not st.session_state.show_logs
+        st.rerun()
+
+    if st.session_state.show_logs:
+        if st.session_state.logs:
+            # Log controls
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("Löschen", type="secondary", key="clear_logs"):
+                    st.session_state.logs = []
+                    st.rerun()
+
+            with col2:
+                logs_json = json.dumps(st.session_state.logs, indent=2, default=str)
+                st.download_button(
+                    label="Export",
+                    data=logs_json,
+                    file_name=f"chat_protokolle_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json",
+                    key="export_logs",
+                )
+
+            col3, col4 = st.columns(2)
+            with col3:
+                filter_level = st.selectbox(
+                    "Filter",
+                    ["ALLE", "FEHLER", "INFO", "ERFOLG", "DEBUG"],
+                    key="log_filter",
+                )
+
+            with col4:
+                max_logs = st.number_input(
+                    "Max anzeigen",
+                    min_value=5,
+                    max_value=100,
+                    value=20,
+                    step=5,
+                    key="max_logs",
+                )
+
+            st.markdown("---")
+
+            # Filter and limit logs before rendering
+            filtered_logs = [
+                log
+                for log in reversed(st.session_state.logs)
+                if filter_level == "ALLE" or log["level"] == filter_level
+            ][: int(max_logs)]
+
+            # Color-code log levels (defined once)
+            level_colors = {
+                "FEHLER": "🔴",
+                "ERFOLG": "🟢",
+                "INFO": "🔵",
+                "DEBUG": "⚪",
+            }
+
+            # Display logs with optimized rendering
+            for i, log in enumerate(filtered_logs):
+                icon = level_colors.get(log["level"], "⚪")
+
+                with st.expander(
+                    f"{icon} {log['timestamp'].split()[1]} - {log['message'][:40]}...",
+                    expanded=log["level"] == "FEHLER",
+                ):
+                    # Combine multiple text calls into one
+                    log_text = f"Level: {log['level']}\nZeit: {log['timestamp']}\nNachricht: {log['message']}"
+                    st.text(log_text)
+
+                    if log["details"]:
+                        st.json(log["details"])
+        else:
+            st.info("Keine Protokolle verfügbar")
 
 # Initialize thread if not exists
 if not st.session_state.thread:
@@ -152,7 +317,7 @@ if not st.session_state.thread:
     if thread:
         st.session_state.thread = thread
     else:
-        _ = st.error("Failed to create thread. Please try again.")
+        st.error("Failed to create thread. Please try again.")
         st.stop()
 
 if st.session_state.messages and len(st.session_state.messages) > 0:
@@ -193,17 +358,14 @@ if user_input and assistant_id_input:
                                 st.write(message.content[0].text.value)
                             break
             elif run.status == "failed":
-                _ = st.error(
+                st.error(
                     f"Die Interaktion mit dem Assistenten ist fehlgeschlagen: {run.last_error}"
                 )
             elif run.status == "requires_action":
-                _ = st.info(
+                st.info(
                     "Der Assistent benötigt Tools (müssen in den Einstellungen des Assistenten aktiviert werden, bevor sie verwendet werden können). Bitte überprüfen Sie Ihre Einstellungen."
                 )
             else:
-                _ = st.warning(
+                st.warning(
                     f"Die Konversation mit dem Assistenten ist fehlgeschlagen: {run.status}"
                 )
-
-            # Rerun to update the interface
-            st.rerun()
