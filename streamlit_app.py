@@ -26,17 +26,6 @@ st.markdown(
 )
 
 
-@st.cache_resource
-def get_openai_client():
-    api_key = OPENAI_API_KEY if OPENAI_API_KEY else os.getenv("OPENAI_API_KEY", "")
-    if not api_key:
-        st.error("Please set your OpenAI API key.")
-        return None
-    return OpenAI(api_key=api_key)
-
-
-client = get_openai_client()
-
 # Initialize session state
 if "thread" not in st.session_state:
     st.session_state.thread = None
@@ -46,16 +35,8 @@ if "logs" not in st.session_state:
     st.session_state.logs = []
 if "show_logs" not in st.session_state:
     st.session_state.show_logs = False
-
-
-# Configuration
-@st.cache_resource
-def get_assistant_id():
-    assistant_id = ASSISTANT_ID if ASSISTANT_ID else os.getenv("ASSISTANT_ID", "")
-    if not assistant_id:
-        st.error("Please set your Assistant ID.")
-        return None
-    return assistant_id
+if "openai_api_key" not in st.session_state:
+    st.session_state.openai_api_key = ""
 
 
 def add_log(level, message, details=None):
@@ -189,14 +170,48 @@ st.title("KI Assistenten Chat")
 with st.sidebar:
     st.header("Konfiguration")
 
+    # OpenAI API Key input
+    api_key_input = st.text_input(
+        "OpenAI API Key",
+        value=OPENAI_API_KEY,
+        help="Enter your OpenAI API Key",
+        type="password",
+    )
+
+    # Update session state with API key
+    if api_key_input:
+        st.session_state.openai_api_key = api_key_input
+    elif not api_key_input and not OPENAI_API_KEY:
+        api_key_from_env = os.getenv("OPENAI_API_KEY", "")
+        if api_key_from_env:
+            st.session_state.openai_api_key = api_key_from_env
+
+    # Check if API key is set
+    has_api_key = bool(st.session_state.openai_api_key)
+
+    # Initialize OpenAI client if API key is available
+    if has_api_key:
+        try:
+            client = OpenAI(api_key=st.session_state.openai_api_key)
+        except Exception as e:
+            st.error(f"Failed to initialize OpenAI client: {e}")
+            has_api_key = False
+    else:
+        st.warning("Bitte geben Sie Ihren OpenAI API Key ein")
+        st.info(
+            "Sie können einen API Key von der [OpenAI Platform](https://platform.openai.com/api-keys) erhalten."
+        )
+
+    # Assistant ID input - disabled if no API key
     assistant_id_input = st.text_input(
         "Assistenten-ID",
         value=ASSISTANT_ID,
         help="Enter your OpenAI Assistant ID",
         type="password",
+        disabled=not has_api_key,
     )
 
-    if assistant_id_input:
+    if assistant_id_input and has_api_key:
         st.session_state.assistant_id = assistant_id_input
 
         # Get assistant info
@@ -220,6 +235,8 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Failed to connect to assistant: {e}")
             st.stop()
+    elif not has_api_key:
+        st.stop()
     else:
         st.warning("Bitte geben Sie eine Assistenten-ID ein, um zu chatten")
         st.info(
