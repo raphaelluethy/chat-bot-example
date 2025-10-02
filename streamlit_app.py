@@ -177,8 +177,15 @@ with st.sidebar:
         help="Enter your OpenAI API Key",
         type="password",
     )
+    has_api_key = bool(st.session_state.openai_api_key)
+    assistant_id_input = st.text_input(
+        "Assistenten-ID",
+        value=ASSISTANT_ID,
+        help="Enter your OpenAI Assistant ID",
+        type="password",
+        disabled=not has_api_key,
+    )
 
-    # Update session state with API key
     if api_key_input:
         st.session_state.openai_api_key = api_key_input
     elif not api_key_input and not OPENAI_API_KEY:
@@ -186,10 +193,6 @@ with st.sidebar:
         if api_key_from_env:
             st.session_state.openai_api_key = api_key_from_env
 
-    # Check if API key is set
-    has_api_key = bool(st.session_state.openai_api_key)
-
-    # Initialize OpenAI client if API key is available
     if has_api_key:
         try:
             client = OpenAI(api_key=st.session_state.openai_api_key)
@@ -202,19 +205,9 @@ with st.sidebar:
             "Sie können einen API Key von der [OpenAI Platform](https://platform.openai.com/api-keys) erhalten."
         )
 
-    # Assistant ID input - disabled if no API key
-    assistant_id_input = st.text_input(
-        "Assistenten-ID",
-        value=ASSISTANT_ID,
-        help="Enter your OpenAI Assistant ID",
-        type="password",
-        disabled=not has_api_key,
-    )
-
     if assistant_id_input and has_api_key:
         st.session_state.assistant_id = assistant_id_input
 
-        # Get assistant info
         try:
             assistant = client.beta.assistants.retrieve(assistant_id_input)
             st.success(
@@ -225,7 +218,6 @@ with st.sidebar:
                 st.write(f"**Instructions:** {assistant.instructions[:100]}...")
 
             if st.button("New Chat", type="secondary"):
-                # Create new thread
                 thread = create_thread()
                 if thread:
                     st.session_state.thread = thread
@@ -244,11 +236,9 @@ with st.sidebar:
         )
         st.stop()
 
-    # Logs section in sidebar
     st.divider()
     st.markdown(f"### Logs ({len(st.session_state.logs)})")
 
-    # Toggle for showing logs
     if st.button(
         "▶ Ausklappen" if not st.session_state.show_logs else "▼ Zuklappen",
         key="logs_toggle",
@@ -258,7 +248,6 @@ with st.sidebar:
 
     if st.session_state.show_logs:
         if st.session_state.logs:
-            # Log controls
             col1, col2 = st.columns(2)
 
             with col1:
@@ -296,14 +285,12 @@ with st.sidebar:
 
             st.markdown("---")
 
-            # Filter and limit logs before rendering
             filtered_logs = [
                 log
                 for log in reversed(st.session_state.logs)
                 if filter_level == "ALLE" or log["level"] == filter_level
             ][: int(max_logs)]
 
-            # Color-code log levels (defined once)
             level_colors = {
                 "FEHLER": "🔴",
                 "ERFOLG": "🟢",
@@ -311,7 +298,6 @@ with st.sidebar:
                 "DEBUG": "⚪",
             }
 
-            # Display logs with optimized rendering
             for i, log in enumerate(filtered_logs):
                 icon = level_colors.get(log["level"], "⚪")
 
@@ -319,7 +305,6 @@ with st.sidebar:
                     f"{icon} {log['timestamp'].split()[1]} - {log['message'][:40]}...",
                     expanded=log["level"] == "FEHLER",
                 ):
-                    # Combine multiple text calls into one
                     log_text = f"Level: {log['level']}\nZeit: {log['timestamp']}\nNachricht: {log['message']}"
                     st.text(log_text)
 
@@ -328,7 +313,6 @@ with st.sidebar:
         else:
             st.info("Keine Protokolle verfügbar")
 
-# Initialize thread if not exists
 if not st.session_state.thread:
     thread = create_thread()
     if thread:
@@ -349,7 +333,6 @@ else:
     else:
         st.write("Starten Sie eine neue Konversation")
 
-# Chat input
 user_input = st.chat_input("Tippen Sie hier")
 
 if user_input and assistant_id_input:
@@ -363,12 +346,10 @@ if user_input and assistant_id_input:
             run = wait_on_run(run, st.session_state.thread.id)
 
             if run.status == "completed":
-                # Get updated messages
                 messages = get_thread_messages(st.session_state.thread.id)
                 if messages and messages.data:
                     st.session_state.messages = messages.data
 
-                    # Display only the new assistant message
                     for message in reversed(messages.data):
                         if message.role == "assistant" and message.content:
                             with st.chat_message("assistant"):
