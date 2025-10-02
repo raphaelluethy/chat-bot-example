@@ -43,7 +43,7 @@ set ASSISTANT_ID="your-assistant-id-here"
 
 1. **Start the application**:
    ```bash
-   streamlit run app.py
+   streamlit run streamlit_app.py
    ```
 
 2. **Enter your Assistant ID**:
