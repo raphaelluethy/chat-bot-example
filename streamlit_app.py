@@ -217,7 +217,23 @@ with st.sidebar:
         help="Enter your OpenAI API Key",
         type="password",
     )
-    has_api_key = bool(st.session_state.openai_api_key)
+
+    # Update session state with API key
+    if api_key_input:
+        st.session_state.openai_api_key = api_key_input
+    elif not api_key_input and not OPENAI_API_KEY:
+        api_key_from_env = os.getenv("OPENAI_API_KEY", "")
+        if api_key_from_env:
+            st.session_state.openai_api_key = api_key_from_env
+    elif OPENAI_API_KEY and not st.session_state.openai_api_key:
+        # Use hardcoded API key if available and session state is empty
+        st.session_state.openai_api_key = OPENAI_API_KEY
+
+    # Check if we have an API key after updating session state
+    has_api_key = bool(
+        getattr(st.session_state, "openai_api_key", "") or OPENAI_API_KEY
+    )
+
     assistant_id_input = st.text_input(
         "Assistenten-ID",
         value=ASSISTANT_ID,
@@ -225,13 +241,6 @@ with st.sidebar:
         type="password",
         disabled=not has_api_key,
     )
-
-    if api_key_input:
-        st.session_state.openai_api_key = api_key_input
-    elif not api_key_input and not OPENAI_API_KEY:
-        api_key_from_env = os.getenv("OPENAI_API_KEY", "")
-        if api_key_from_env:
-            st.session_state.openai_api_key = api_key_from_env
 
     if has_api_key:
         try:
