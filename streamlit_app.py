@@ -80,20 +80,40 @@ def submit_message(assistant_id, thread_id, user_message):
     add_log(
         "INFO",
         f"Sende Nachricht",
-        {"thread_id": thread_id, "message_length": len(user_message)},
+        {
+            "thread_id": thread_id,
+            "message_length": len(user_message),
+            "content_preview": user_message[:100] + "..."
+            if len(user_message) > 100
+            else user_message,
+        },
     )
     try:
         # Create message
         message = client.beta.threads.messages.create(
             thread_id=thread_id, role="user", content=user_message
         )
-        add_log("SUCCESS", f"Nachricht erstellt", {"message_id": message.id})
+        add_log(
+            "SUCCESS",
+            f"Benutzer-Nachricht erstellt",
+            {
+                "message_id": message.id,
+                "role": "user",
+                "content": user_message,
+                "thread_id": thread_id,
+                "created_at": message.created_at,
+            },
+        )
 
         # Create run
         run = client.beta.threads.runs.create(
             thread_id=thread_id, assistant_id=assistant_id
         )
-        add_log("SUCCESS", f"Run erstellt", {"run_id": run.id, "status": run.status})
+        add_log(
+            "SUCCESS",
+            f"Run erstellt",
+            {"run_id": run.id, "status": run.status, "assistant_id": assistant_id},
+        )
         return run
     except Exception as e:
         add_log("ERROR", f"Fehler beim Senden der Nachricht: {e}")
@@ -139,10 +159,30 @@ def get_thread_messages(thread_id):
     try:
         messages = client.beta.threads.messages.list(thread_id=thread_id, order="asc")
         message_count = len(messages.data) if messages.data else 0
+
+        # Create detailed message info for logging
+        message_details = []
+        if messages.data:
+            for msg in messages.data:
+                msg_detail = {
+                    "id": msg.id,
+                    "role": msg.role,
+                    "content": msg.content[0].text.value
+                    if msg.content and len(msg.content) > 0
+                    else "",
+                    "created_at": msg.created_at,
+                    "thread_id": msg.thread_id,
+                }
+                message_details.append(msg_detail)
+
         add_log(
             "SUCCESS",
             f"Nachrichten abgerufen",
-            {"count": message_count, "thread_id": thread_id},
+            {
+                "count": message_count,
+                "thread_id": thread_id,
+                "messages": message_details,
+            },
         )
         return messages
     except Exception as e:
@@ -352,8 +392,22 @@ if user_input and assistant_id_input:
 
                     for message in reversed(messages.data):
                         if message.role == "assistant" and message.content:
+                            assistant_content = message.content[0].text.value
+                            # Log the assistant's response
+                            add_log(
+                                "SUCCESS",
+                                f"Assistenten-Antwort erhalten",
+                                {
+                                    "message_id": message.id,
+                                    "role": "assistant",
+                                    "content": assistant_content,
+                                    "thread_id": message.thread_id,
+                                    "created_at": message.created_at,
+                                    "run_id": run.id,
+                                },
+                            )
                             with st.chat_message("assistant"):
-                                st.write(message.content[0].text.value)
+                                st.write(assistant_content)
                             break
             elif run.status == "failed":
                 st.error(
