@@ -85,7 +85,10 @@ def submit_message(assistant_id, thread_id, user_message):
     try:
         # Create message
         message = client.beta.threads.messages.create(
-            thread_id=thread_id, role="user", content=user_message
+            thread_id=thread_id,
+            role="user",
+            content=user_message,
+            store=True
         )
         add_log("SUCCESS", f"Nachricht erstellt", {"message_id": message.id})
 
